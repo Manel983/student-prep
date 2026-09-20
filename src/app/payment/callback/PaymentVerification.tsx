@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -21,18 +21,15 @@ export default function PaymentVerification({
 
     async function verifyPayment() {
       try {
-        const response = await fetch(
-          "/api/payments/verify",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              reference,
-            }),
-          }
-        );
+        const response = await fetch("/api/payments/verify", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            reference,
+          }),
+        });
 
         const data = await response.json();
 
@@ -40,8 +37,7 @@ export default function PaymentVerification({
 
         if (!response.ok || !data.success) {
           setError(
-            data.message ||
-              "We could not verify your payment."
+            data.message || "We could not verify your payment."
           );
           setLoading(false);
           return;
@@ -68,7 +64,7 @@ export default function PaymentVerification({
   if (loading) {
     return (
       <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-slate-200">
-        <div className="text-4xl">⏳</div>
+        <div className="text-4xl">Loading...</div>
 
         <h1 className="mt-4 text-2xl font-bold text-slate-900">
           Verifying Payment
@@ -87,7 +83,7 @@ export default function PaymentVerification({
 
   return (
     <div className="w-full max-w-md rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-slate-200">
-      <div className="text-4xl">❌</div>
+      <div className="text-4xl">ERROR</div>
 
       <h1 className="mt-4 text-2xl font-bold text-slate-900">
         Payment Verification Failed
@@ -101,12 +97,29 @@ export default function PaymentVerification({
         Reference: {reference}
       </p>
 
-      <Link
-        href="/subscription"
-        className="mt-6 inline-block rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-700"
-      >
-        Back to Subscription
-      </Link>
+      <div className="mt-6 flex flex-col gap-3">
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+        >
+          Try Verification Again
+        </button>
+
+        <Link
+          href="/subscription"
+          className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+        >
+          Back to Subscription
+        </Link>
+
+        <Link
+          href="/dashboard"
+          className="text-sm font-medium text-blue-600 hover:text-blue-700"
+        >
+          Go to Dashboard
+        </Link>
+      </div>
     </div>
   );
 }
