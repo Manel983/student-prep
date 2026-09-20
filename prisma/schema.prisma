@@ -1,0 +1,331 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  STUDENT
+  ADMIN
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PENDING
+}
+
+enum PlanType {
+  FREE
+  MONTHLY
+  SIX_MONTHS
+  YEARLY
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum QuestionStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ExamStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  SUBMITTED
+  AUTO_SUBMITTED
+  MARKED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  role         Role     @default(STUDENT)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  profile       Profile?
+  subscriptions Subscription[]
+  payments      Payment[]
+  exams         Exam[]
+  results       Result[]
+
+  accounts Account[]
+  sessions Session[]
+
+  @@index([email])
+}
+
+model Profile {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  phone       String?
+  school      String?
+  classLevel  String?
+  dateOfBirth DateTime?
+  avatarUrl   String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Plan {
+  id                  String   @id @default(cuid())
+  name                String
+  type                PlanType @unique
+  price               Decimal  @db.Decimal(10, 2)
+  durationDays        Int?
+  testsAllowed        Int?
+  questionsPerSubject Int?
+  unlimitedTests      Boolean  @default(false)
+  unlimitedQuestions  Boolean  @default(false)
+  description         String?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id              String             @id @default(cuid())
+  userId          String
+  planId          String
+  status          SubscriptionStatus @default(PENDING)
+  startedAt       DateTime?
+  expiresAt       DateTime?
+  testsUsed       Int                @default(0)
+  freeTestsUsed   Int                @default(0)
+  paymentRequired Boolean            @default(true)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
+}
+
+model Payment {
+  id             String        @id @default(cuid())
+  userId         String
+  subscriptionId String?
+  reference      String        @unique
+  amount         Decimal       @db.Decimal(10, 2)
+  currency       String        @default("GHS")
+  status         PaymentStatus @default(PENDING)
+  paidAt         DateTime?
+  provider       String?
+  metadata       Json?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([status])
+}
+
+model Subject {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  topics    Topic[]
+  questions Question[]
+  exams     Exam[]
+}
+
+model Topic {
+  id          String   @id @default(cuid())
+  subjectId   String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  questions Question[]
+
+  @@unique([subjectId, name])
+  @@index([subjectId])
+}
+
+model Question {
+  id            String         @id @default(cuid())
+  subjectId     String
+  topicId       String?
+  questionText  String
+  optionA       String
+  optionB       String
+  optionC       String
+  optionD       String
+  correctAnswer String
+  explanation   String?
+  difficulty    Difficulty     @default(MEDIUM)
+  marks         Int            @default(1)
+  status        QuestionStatus @default(DRAFT)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  subject        Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topic          Topic?          @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  examQuestions  ExamQuestion[]
+  studentAnswers StudentAnswer[]
+  mistakes       Mistake[]
+
+  @@index([subjectId])
+  @@index([topicId])
+  @@index([status])
+}
+
+model Exam {
+  id              String     @id @default(cuid())
+  creationKey     String?    @unique
+  userId          String
+  subjectId       String
+  title           String
+  durationMinutes Int
+  totalQuestions  Int
+  status          ExamStatus @default(NOT_STARTED)
+  startedAt       DateTime?
+  expiresAt       DateTime?
+  submittedAt     DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject   Subject         @relation(fields: [subjectId], references: [id])
+  questions ExamQuestion[]
+  answers   StudentAnswer[]
+  result    Result?
+
+  @@index([userId])
+  @@index([subjectId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ExamQuestion {
+  id         String @id @default(cuid())
+  examId     String
+  questionId String
+  questionNo Int
+  marks      Int    @default(1)
+
+  exam     Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id])
+
+  @@unique([examId, questionId])
+  @@unique([examId, questionNo])
+}
+
+model StudentAnswer {
+  id           String    @id @default(cuid())
+  examId       String
+  questionId   String
+  answer       String?
+  isCorrect    Boolean?
+  marksAwarded Int       @default(0)
+  answeredAt   DateTime?
+
+  exam     Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id])
+
+  @@unique([examId, questionId])
+  @@index([examId])
+}
+
+model Result {
+  id              String   @id @default(cuid())
+  examId          String   @unique
+  userId          String
+  score           Int
+  totalMarks      Int
+  percentage      Decimal  @db.Decimal(5, 2)
+  correctAnswers  Int
+  wrongAnswers    Int
+  unanswered      Int
+  timeUsedSeconds Int?
+  completedAt     DateTime @default(now())
+
+  exam     Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mistakes Mistake[]
+
+  @@index([userId])
+  @@index([completedAt])
+}
+
+model Mistake {
+  id            String   @id @default(cuid())
+  resultId      String
+  questionId    String
+  studentAnswer String?
+  correctAnswer String
+  explanation   String?
+  createdAt     DateTime @default(now())
+
+  result   Result   @relation(fields: [resultId], references: [id], onDelete: Cascade)
+  question Question @relation(fields: [questionId], references: [id])
+
+  @@unique([resultId, questionId])
+  @@index([resultId])
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
