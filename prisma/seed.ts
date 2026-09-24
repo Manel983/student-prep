@@ -273,7 +273,8 @@ async function main() {
       optionC: "3/5",
       optionD: "4/6",
       correctAnswer: "B",
-      explanation: "Multiplying both numerator and denominator of 1/2 by 2 gives 2/4.",
+      explanation:
+        "Multiplying both numerator and denominator of 1/2 by 2 gives 2/4.",
       difficulty: "EASY" as const,
     },
     {
@@ -322,7 +323,8 @@ async function main() {
     },
     {
       topicId: geometryTopic.id,
-      questionText: "What is the perimeter of a square with a side of 6 cm?",
+      questionText:
+        "What is the perimeter of a square with a side of 6 cm?",
       optionA: "12 cm",
       optionB: "18 cm",
       optionC: "24 cm",
@@ -333,7 +335,8 @@ async function main() {
     },
     {
       topicId: geometryTopic.id,
-      questionText: "What is the area of a rectangle with length 8 cm and width 5 cm?",
+      questionText:
+        "What is the area of a rectangle with length 8 cm and width 5 cm?",
       optionA: "13 cm²",
       optionB: "26 cm²",
       optionC: "40 cm²",
@@ -350,7 +353,8 @@ async function main() {
       optionC: "Obtuse angle",
       optionD: "Straight angle",
       correctAnswer: "A",
-      explanation: "An acute angle is greater than 0° but less than 90°.",
+      explanation:
+        "An acute angle is greater than 0° but less than 90°.",
       difficulty: "EASY" as const,
     },
     {
@@ -405,7 +409,8 @@ async function main() {
       optionC: "16",
       optionD: "18",
       correctAnswer: "C",
-      explanation: "First calculate 5 + 3 = 8, then 2 × 8 = 16.",
+      explanation:
+        "First calculate 5 + 3 = 8, then 2 × 8 = 16.",
       difficulty: "MEDIUM" as const,
     },
   ];
@@ -425,6 +430,8 @@ async function main() {
         },
         data: {
           ...question,
+          classLevel: "JHS_1",
+          examType: "LIKELY",
           status: "PUBLISHED",
           subjectId: mathematicsId,
           marks: 1,
@@ -434,6 +441,8 @@ async function main() {
       await prisma.question.create({
         data: {
           ...question,
+          classLevel: "JHS_1",
+          examType: "LIKELY",
           subjectId: mathematicsId,
           marks: 1,
           status: "PUBLISHED",

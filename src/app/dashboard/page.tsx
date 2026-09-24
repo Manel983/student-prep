@@ -62,59 +62,52 @@ export default async function DashboardPage() {
    * ---------------------------------------------------------
    * SUBSCRIPTION STATUS
    * ---------------------------------------------------------
-   *
-   * A paid subscription is only considered active when:
-   * - status is ACTIVE
-   * - it has not expired
-   *
-   * If the paid subscription has expired, we check whether
-   * the student still has an available Free subscription.
    */
 
   const now = new Date();
 
-// Mark expired paid subscriptions as EXPIRED.
-const expiredPaidSubscriptions = user.subscriptions.filter(
-  (sub) =>
-    sub.plan.type !== "FREE" &&
-    sub.status === "ACTIVE" &&
-    sub.expiresAt &&
-    sub.expiresAt <= now
-);
+  // Mark expired paid subscriptions as EXPIRED.
+  const expiredPaidSubscriptions = user.subscriptions.filter(
+    (sub) =>
+      sub.plan.type !== "FREE" &&
+      sub.status === "ACTIVE" &&
+      sub.expiresAt &&
+      sub.expiresAt <= now
+  );
 
-if (expiredPaidSubscriptions.length > 0) {
-  await prisma.subscription.updateMany({
-    where: {
-      id: {
-        in: expiredPaidSubscriptions.map((sub) => sub.id),
+  if (expiredPaidSubscriptions.length > 0) {
+    await prisma.subscription.updateMany({
+      where: {
+        id: {
+          in: expiredPaidSubscriptions.map((sub) => sub.id),
+        },
+        status: "ACTIVE",
       },
-      status: "ACTIVE",
-    },
-    data: {
-      status: "EXPIRED",
-    },
-  });
+      data: {
+        status: "EXPIRED",
+      },
+    });
 
-  for (const sub of expiredPaidSubscriptions) {
-    sub.status = "EXPIRED";
+    for (const sub of expiredPaidSubscriptions) {
+      sub.status = "EXPIRED";
+    }
   }
-}
 
-const activePaidSubscription = user.subscriptions.find(
-  (sub) =>
-    sub.plan.type !== "FREE" &&
-    sub.status === "ACTIVE" &&
-    (!sub.expiresAt || sub.expiresAt > now)
-);
+  const activePaidSubscription = user.subscriptions.find(
+    (sub) =>
+      sub.plan.type !== "FREE" &&
+      sub.status === "ACTIVE" &&
+      (!sub.expiresAt || sub.expiresAt > now)
+  );
 
-// Find an active Free subscription with remaining tests
-const activeFreeSubscription = user.subscriptions.find(
-  (sub) =>
-    sub.plan.type === "FREE" &&
-    sub.status === "ACTIVE" &&
-    sub.plan.testsAllowed !== null &&
-    sub.testsUsed < sub.plan.testsAllowed
-);
+  // Find an active Free subscription with remaining tests
+  const activeFreeSubscription = user.subscriptions.find(
+    (sub) =>
+      sub.plan.type === "FREE" &&
+      sub.status === "ACTIVE" &&
+      sub.plan.testsAllowed !== null &&
+      sub.testsUsed < sub.plan.testsAllowed
+  );
 
   // Paid subscription takes priority.
   // If there is no active paid subscription, use Free if available.
@@ -140,10 +133,29 @@ const activeFreeSubscription = user.subscriptions.find(
     isFreePlan &&
     plan?.testsAllowed !== null &&
     plan?.testsAllowed !== undefined
-      ? Math.max(plan.testsAllowed - (subscription?.testsUsed ?? 0), 0)
+      ? Math.max(
+          plan.testsAllowed - (subscription?.testsUsed ?? 0),
+          0
+        )
       : null;
 
   const firstName = user.firstName;
+
+  const classLabels: Record<string, string> = {
+    PRIMARY_1: "Primary 1",
+    PRIMARY_2: "Primary 2",
+    PRIMARY_3: "Primary 3",
+    PRIMARY_4: "Primary 4",
+    PRIMARY_5: "Primary 5",
+    PRIMARY_6: "Primary 6",
+    JHS_1: "JHS 1",
+    JHS_2: "JHS 2",
+    JHS_3: "JHS 3",
+  };
+
+  const studentClass = user.profile?.classLevel
+    ? classLabels[user.profile.classLevel] ?? user.profile.classLevel
+    : "Class not set";
 
   const totalTests = user.results.length;
 
@@ -195,12 +207,17 @@ const activeFreeSubscription = user.subscriptions.find(
   return (
     <main className="min-h-screen bg-slate-50">
       {/* Header */}
-      <header className="border-b bg-white">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-600 font-bold text-white">
-              SP
-            </div>
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-3"
+          >
+            <img
+              src="/logo.jpg"
+              alt="Student Prep"
+              className="h-11 w-auto object-contain"
+            />
 
             <div>
               <h1 className="text-lg font-bold text-slate-900">
@@ -211,9 +228,9 @@ const activeFreeSubscription = user.subscriptions.find(
                 Test your knowledge
               </p>
             </div>
-          </div>
+          </Link>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 sm:gap-4">
             <div className="hidden text-right sm:block">
               <p className="text-sm font-semibold text-slate-900">
                 {user.firstName} {user.lastName}
@@ -222,9 +239,13 @@ const activeFreeSubscription = user.subscriptions.find(
               <p className="text-xs text-slate-500">
                 {user.email}
               </p>
+
+              <p className="mt-1 text-xs font-semibold text-blue-600">
+                {studentClass}
+              </p>
             </div>
 
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 font-bold text-blue-700 ring-2 ring-blue-50">
               {user.firstName.charAt(0)}
               {user.lastName.charAt(0)}
             </div>
@@ -232,47 +253,66 @@ const activeFreeSubscription = user.subscriptions.find(
         </div>
       </header>
 
-      {/* Dashboard */}
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Welcome */}
         <section className="mb-8">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">
-                Student Dashboard
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-green-500" />
+
+                <p className="text-sm font-semibold text-green-700">
+                  Student Dashboard
+                </p>
+              </div>
+
+              <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-900">
+                Welcome back, {firstName}! 👋
               </h1>
 
-              <p className="mt-1 text-sm text-slate-600">
-                Welcome back to your Student Prep dashboard.
-              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <p className="text-slate-600">
+                  Keep learning, keep practising, and keep improving.
+                </p>
+
+                <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">
+                  {studentClass}
+                </span>
+              </div>
             </div>
 
             <LogoutButton />
           </div>
-
-          <h2 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-            Welcome back, {firstName}! 👋
-          </h2>
-
-          <p className="mt-2 text-slate-600">
-            Keep learning, keep practicing, and keep improving.
-          </p>
         </section>
 
         {/* Statistics */}
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {/* Current Plan */}
-          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">
-              Current Plan
-            </p>
+          <div className="rounded-2xl border border-blue-100 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-slate-500">
+                  Current Plan
+                </p>
 
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {plan?.name ?? "No Active Plan"}
-            </p>
+                <p className="mt-2 text-2xl font-bold text-slate-900">
+                  {plan?.name ?? "No Active Plan"}
+                </p>
+              </div>
+
+              <span
+                className={`flex h-9 w-9 items-center justify-center rounded-lg ${
+                  hasActivePlan
+                    ? "bg-green-100 text-green-700"
+                    : "bg-red-100 text-red-700"
+                }`}
+              >
+                {hasActivePlan ? "✓" : "!"}
+              </span>
+            </div>
 
             <p
-              className={`mt-1 text-xs font-medium ${
+              className={`mt-2 text-xs font-bold ${
                 hasActivePlan
                   ? "text-green-600"
                   : "text-red-600"
@@ -284,63 +324,89 @@ const activeFreeSubscription = user.subscriptions.find(
             </p>
 
             {isFreePlan && freeTestsRemaining !== null && (
-              <p className="mt-1 text-xs text-slate-500">
-                {freeTestsRemaining} free test
-                {freeTestsRemaining === 1 ? "" : "s"} remaining
-              </p>
+              <div className="mt-3 rounded-lg bg-blue-50 px-3 py-2">
+                <p className="text-xs font-medium text-blue-700">
+                  {freeTestsRemaining} free test
+                  {freeTestsRemaining === 1 ? "" : "s"} remaining
+                </p>
+              </div>
             )}
 
             <Link
               href="/subscription"
-              className="mt-4 inline-block rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
+              className="mt-4 inline-flex items-center rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100"
             >
               Manage Subscription
             </Link>
           </div>
 
           {/* Tests Completed */}
-          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">
-              Tests Completed
-            </p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">
+                  Tests Completed
+                </p>
 
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {totalTests}
-            </p>
+                <p className="mt-2 text-3xl font-bold text-slate-900">
+                  {totalTests}
+                </p>
+              </div>
 
-            <p className="mt-1 text-xs text-slate-500">
-              Keep practicing!
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-lg">
+                📝
+              </span>
+            </div>
+
+            <p className="mt-2 text-xs text-slate-500">
+              Keep practising!
             </p>
           </div>
 
           {/* Average Score */}
-          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">
-              Average Score
-            </p>
+          <div className="rounded-2xl border border-green-100 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">
+                  Average Score
+                </p>
 
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {averageScore}%
-            </p>
+                <p className="mt-2 text-3xl font-bold text-green-600">
+                  {averageScore}%
+                </p>
+              </div>
 
-            <p className="mt-1 text-xs text-slate-500">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-100 text-green-700">
+                ✓
+              </span>
+            </div>
+
+            <p className="mt-2 text-xs text-slate-500">
               Based on recent tests
             </p>
           </div>
 
           {/* Questions Available */}
-          <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200">
-            <p className="text-sm text-slate-500">
-              Questions Available
-            </p>
+          <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-sm font-medium text-slate-500">
+                  Questions Available
+                </p>
 
-            <p className="mt-2 text-2xl font-bold text-slate-900">
-              {plan?.unlimitedQuestions
-                ? "Unlimited"
-                : plan?.questionsPerSubject ?? 0}
-            </p>
+                <p className="mt-2 text-2xl font-bold text-blue-600">
+                  {plan?.unlimitedQuestions
+                    ? "Unlimited"
+                    : plan?.questionsPerSubject ?? 0}
+                </p>
+              </div>
 
-            <p className="mt-1 text-xs text-slate-500">
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-100 text-lg">
+                📚
+              </span>
+            </div>
+
+            <p className="mt-2 text-xs text-slate-500">
               Per subject
             </p>
           </div>
@@ -350,20 +416,26 @@ const activeFreeSubscription = user.subscriptions.find(
         {!hasActivePlan && (
           <section className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <h3 className="font-bold text-red-800">
-                  Your subscription has expired
-                </h3>
+              <div className="flex items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-600 font-bold text-white">
+                  !
+                </span>
 
-                <p className="mt-1 text-sm text-red-700">
-                  Renew your subscription to continue taking
-                  tests.
-                </p>
+                <div>
+                  <h3 className="font-bold text-red-800">
+                    Your subscription has expired
+                  </h3>
+
+                  <p className="mt-1 text-sm text-red-700">
+                    Renew your subscription to continue taking
+                    tests.
+                  </p>
+                </div>
               </div>
 
               <Link
                 href="/subscription"
-                className="inline-block rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-red-700"
+                className="inline-flex items-center justify-center rounded-lg bg-red-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700"
               >
                 Renew Subscription
               </Link>
@@ -384,10 +456,14 @@ const activeFreeSubscription = user.subscriptions.find(
                   Subjects
                 </h3>
 
-                <p className="text-sm text-slate-500">
-                  Choose a subject to start practicing.
+                <p className="mt-1 text-sm text-slate-500">
+                  Choose a subject to start practising.
                 </p>
               </div>
+
+              <span className="hidden rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 sm:inline-block">
+                {subjects.length} available
+              </span>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -421,47 +497,65 @@ const activeFreeSubscription = user.subscriptions.find(
             <div className="mt-4 space-y-4">
               <Link
                 href="#subjects"
-                className="block w-full rounded-2xl bg-blue-600 p-5 text-left text-white shadow-sm transition hover:bg-blue-700"
+                className="group block w-full rounded-2xl bg-blue-600 p-5 text-left text-white shadow-sm transition hover:bg-blue-700 hover:shadow-md"
               >
-                <div className="text-2xl">📝</div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/15 text-2xl">
+                  📝
+                </div>
 
-                <h4 className="mt-3 font-bold">
+                <h4 className="mt-4 font-bold">
                   Start a Test
                 </h4>
 
                 <p className="mt-1 text-sm text-blue-100">
                   Test yourself on any available subject.
                 </p>
+
+                <span className="mt-4 inline-block text-sm font-semibold text-white">
+                  Choose a subject →
+                </span>
               </Link>
 
               <Link
                 href="#recent-results"
-                className="block w-full rounded-2xl bg-white p-5 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md"
+                className="group block w-full rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition hover:border-blue-200 hover:shadow-md"
               >
-                <div className="text-2xl">📊</div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-2xl">
+                  📊
+                </div>
 
-                <h4 className="mt-3 font-bold text-slate-900">
+                <h4 className="mt-4 font-bold text-slate-900">
                   View Results
                 </h4>
 
                 <p className="mt-1 text-sm text-slate-500">
                   Review your previous test performance.
                 </p>
+
+                <span className="mt-4 inline-block text-sm font-semibold text-blue-600">
+                  View results →
+                </span>
               </Link>
 
               <Link
                 href="#recent-results"
-                className="block w-full rounded-2xl bg-white p-5 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md"
+                className="group block w-full rounded-2xl border border-green-100 bg-white p-5 text-left shadow-sm transition hover:border-green-200 hover:shadow-md"
               >
-                <div className="text-2xl">🧠</div>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-green-50 text-2xl">
+                  🧠
+                </div>
 
-                <h4 className="mt-3 font-bold text-slate-900">
+                <h4 className="mt-4 font-bold text-slate-900">
                   Review Mistakes
                 </h4>
 
                 <p className="mt-1 text-sm text-slate-500">
                   Learn from questions you answered incorrectly.
                 </p>
+
+                <span className="mt-4 inline-block text-sm font-semibold text-green-600">
+                  Review mistakes →
+                </span>
               </Link>
             </div>
           </div>
@@ -472,74 +566,121 @@ const activeFreeSubscription = user.subscriptions.find(
           id="recent-results"
           className="mt-10"
         >
-          <div className="mb-4">
-            <h3 className="text-xl font-bold text-slate-900">
-              Recent Results
-            </h3>
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900">
+                Recent Results
+              </h3>
 
-            <p className="text-sm text-slate-500">
-              Your latest completed tests.
-            </p>
+              <p className="text-sm text-slate-500">
+                Your latest completed tests.
+              </p>
+            </div>
+
+            {user.results.length > 0 && (
+              <span className="text-xs font-medium text-slate-500">
+                Showing your latest {user.results.length}
+              </span>
+            )}
           </div>
 
-          <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             {user.results.length === 0 ? (
               <div className="px-6 py-12 text-center">
-                <div className="text-4xl">📚</div>
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-3xl">
+                  📚
+                </div>
 
-                <h4 className="mt-4 font-bold text-slate-900">
+                <h4 className="mt-5 font-bold text-slate-900">
                   No tests completed yet
                 </h4>
 
                 <p className="mt-2 text-sm text-slate-500">
                   Choose a subject above and take your first test.
                 </p>
+
+                <Link
+                  href="#subjects"
+                  className="mt-5 inline-flex rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
+                >
+                  Start Your First Test
+                </Link>
               </div>
             ) : (
               <div className="divide-y divide-slate-100">
-                {user.results.map((result) => (
-                  <div
-                    key={result.id}
-                    className="flex flex-col gap-3 px-6 py-5 sm:flex-row sm:items-center sm:justify-between"
-                  >
-                    <div>
-                      <h4 className="font-semibold text-slate-900">
-                        {result.exam.subject.name}
-                      </h4>
+                {user.results.map((result) => {
+                  const percentage = Number(result.percentage);
 
-                      <p className="text-sm text-slate-500">
-                        {result.exam.title}
-                      </p>
-                    </div>
+                  const scoreClass =
+                    percentage >= 80
+                      ? "bg-green-50 text-green-700 ring-green-200"
+                      : percentage >= 40
+                        ? "bg-blue-50 text-blue-700 ring-blue-200"
+                        : "bg-red-50 text-red-700 ring-red-200";
 
-                    <div className="flex items-center gap-6">
-                      <div className="text-right">
-                        <p className="text-lg font-bold text-slate-900">
-                          {Number(result.percentage)}%
-                        </p>
+                  return (
+                    <div
+                      key={result.id}
+                      className="flex flex-col gap-4 px-6 py-5 transition hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-sm font-bold text-blue-700">
+                          {result.exam.subject.name
+                            .charAt(0)
+                            .toUpperCase()}
+                        </div>
 
-                        <p className="text-xs text-slate-500">
-                          {result.correctAnswers} correct
-                        </p>
+                        <div>
+                          <h4 className="font-semibold text-slate-900">
+                            {result.exam.subject.name}
+                          </h4>
+
+                          <p className="mt-1 text-sm text-slate-500">
+                            {result.exam.title}
+                          </p>
+                        </div>
                       </div>
 
-                      <Link
-                        href={`/results/${result.id}`}
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                      >
-                        Review
-                      </Link>
+                      <div className="flex items-center justify-between gap-5 sm:justify-end">
+                        <div className="text-right">
+                          <span
+                            className={`inline-flex rounded-full px-3 py-1 text-sm font-bold ring-1 ${scoreClass}`}
+                          >
+                            {percentage}%
+                          </span>
+
+                          <p className="mt-1 text-xs text-slate-500">
+                            {result.correctAnswers} correct
+                          </p>
+                        </div>
+
+                        <Link
+                          href={`/results/${result.id}`}
+                          className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
+                        >
+                          Review
+                        </Link>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
         </section>
 
         {/* Footer */}
-        <footer className="mt-12 border-t pt-6 text-center text-sm text-slate-500">
-          Student Prep — Learn. Practice. Improve.
+        <footer className="mt-12 border-t border-slate-200 pt-6 text-center text-sm text-slate-500">
+          Student Prep —{" "}
+          <span className="font-medium text-blue-600">
+            Learn.
+          </span>{" "}
+          <span className="font-medium text-green-600">
+            Practice.
+          </span>{" "}
+          <span className="font-medium text-red-600">
+            Improve.
+          </span>
         </footer>
       </div>
     </main>

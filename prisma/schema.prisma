@@ -52,6 +52,39 @@ enum PaymentStatus {
   REFUNDED
 }
 
+enum ClassLevel {
+  PRIMARY_1
+  PRIMARY_2
+  PRIMARY_3
+  PRIMARY_4
+  PRIMARY_5
+  PRIMARY_6
+  JHS_1
+  JHS_2
+  JHS_3
+}
+
+enum ExamType {
+  BECE
+  LIKELY
+  TOPIC_BASED
+}
+
+enum QuestionImportStatus {
+  UPLOADED
+  PROCESSING
+  READY_FOR_REVIEW
+  IMPORTED
+  FAILED
+}
+
+enum QuestionImportItemStatus {
+  PENDING
+  REVIEWED
+  IMPORTED
+  REJECTED
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -63,28 +96,27 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  profile       Profile?
-  subscriptions Subscription[]
-  payments      Payment[]
-  exams         Exam[]
-  results       Result[]
-
-  accounts Account[]
-  sessions Session[]
+  profile        Profile?
+  subscriptions  Subscription[]
+  payments       Payment[]
+  exams          Exam[]
+  results        Result[]
+  accounts       Account[]
+  sessions       Session[]
 
   @@index([email])
 }
 
 model Profile {
-  id          String    @id @default(cuid())
-  userId      String    @unique
+  id          String     @id @default(cuid())
+  userId      String     @unique
   phone       String?
   school      String?
-  classLevel  String?
+  classLevel  ClassLevel?
   dateOfBirth DateTime?
   avatarUrl   String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
@@ -170,7 +202,8 @@ model Topic {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  subject   Subject    @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
   questions Question[]
 
   @@unique([subjectId, name])
@@ -181,6 +214,9 @@ model Question {
   id            String         @id @default(cuid())
   subjectId     String
   topicId       String?
+  classLevel    ClassLevel
+  examType      ExamType
+  beceYear      Int?
   questionText  String
   optionA       String
   optionB       String
@@ -194,20 +230,24 @@ model Question {
   createdAt     DateTime       @default(now())
   updatedAt     DateTime       @updatedAt
 
-  subject        Subject         @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  topic          Topic?          @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  topic   Topic?  @relation(fields: [topicId], references: [id], onDelete: SetNull)
+
   examQuestions  ExamQuestion[]
   studentAnswers StudentAnswer[]
   mistakes       Mistake[]
 
   @@index([subjectId])
   @@index([topicId])
+  @@index([classLevel])
+  @@index([examType])
+  @@index([beceYear])
   @@index([status])
+  @@index([subjectId, classLevel, examType, beceYear])
 }
 
 model Exam {
   id              String     @id @default(cuid())
-  creationKey     String?    @unique
   userId          String
   subjectId       String
   title           String
@@ -217,11 +257,13 @@ model Exam {
   startedAt       DateTime?
   expiresAt       DateTime?
   submittedAt     DateTime?
+  examCreationKey String?    @unique
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
 
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  subject   Subject         @relation(fields: [subjectId], references: [id])
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id])
+
   questions ExamQuestion[]
   answers   StudentAnswer[]
   result    Result?
@@ -239,8 +281,8 @@ model ExamQuestion {
   questionNo Int
   marks      Int    @default(1)
 
-  exam     Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
-  question Question @relation(fields: [questionId], references: [id])
+  exam      Exam     @relation(fields: [examId], references: [id], onDelete: Cascade)
+  question  Question @relation(fields: [questionId], references: [id])
 
   @@unique([examId, questionId])
   @@unique([examId, questionNo])
@@ -275,8 +317,9 @@ model Result {
   timeUsedSeconds Int?
   completedAt     DateTime @default(now())
 
-  exam     Exam      @relation(fields: [examId], references: [id], onDelete: Cascade)
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exam Exam @relation(fields: [examId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   mistakes Mistake[]
 
   @@index([userId])
@@ -328,4 +371,54 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model QuestionImport {
+  id            String               @id @default(cuid())
+  fileName      String
+  filePath      String?
+  fileType      String?
+  fileSize      Int?
+  extractedText String?
+  status        QuestionImportStatus @default(UPLOADED)
+  errorMessage  String?
+  totalItems    Int                  @default(0)
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  items QuestionImportItem[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model QuestionImportItem {
+  id       String @id @default(cuid())
+  importId String
+
+  questionText  String
+  optionA       String
+  optionB       String
+  optionC       String
+  optionD       String
+  correctAnswer String?
+  explanation   String?
+
+  suggestedClassLevel ClassLevel?
+  suggestedExamType   ExamType?
+  suggestedBeceYear   Int?
+  suggestedTopicId    String?
+
+  status      QuestionImportItemStatus @default(PENDING)
+  reviewNotes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  import QuestionImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@index([importId])
+  @@index([status])
+  @@index([suggestedClassLevel])
+  @@index([suggestedBeceYear])
 }

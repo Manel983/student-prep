@@ -32,8 +32,11 @@ interface ExamClientProps {
 export default function ExamClient({ exam }: ExamClientProps) {
   const router = useRouter();
 
+  const storageKey = `student-prep-exam-${exam.id}`;
+
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [isRestored, setIsRestored] = useState(false);
 
   const [secondsLeft, setSecondsLeft] = useState(() =>
     Math.max(
@@ -47,10 +50,96 @@ export default function ExamClient({ exam }: ExamClientProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  // Prevent multiple automatic/manual submissions.
   const submissionStartedRef = useRef(false);
 
   const currentQuestion = exam.questions[currentIndex];
+
+  /*
+   * Restore the student's answers and current question
+   * when returning to the exam page.
+   */
+  useEffect(() => {
+    try {
+      const savedExamState = window.localStorage.getItem(storageKey);
+
+      if (savedExamState) {
+        const parsed = JSON.parse(savedExamState);
+
+        if (
+          parsed &&
+          typeof parsed === "object" &&
+          typeof parsed.answers === "object"
+        ) {
+          const validQuestionIds = new Set(
+            exam.questions.map((question) => question.id)
+          );
+
+          const restoredAnswers: Record<string, string> = {};
+
+          for (const [questionId, answer] of Object.entries(
+            parsed.answers
+          )) {
+            if (
+              validQuestionIds.has(questionId) &&
+              typeof answer === "string" &&
+              ["A", "B", "C", "D"].includes(answer)
+            ) {
+              restoredAnswers[questionId] = answer;
+            }
+          }
+
+          setAnswers(restoredAnswers);
+
+          if (
+            typeof parsed.currentIndex === "number" &&
+            Number.isInteger(parsed.currentIndex) &&
+            parsed.currentIndex >= 0 &&
+            parsed.currentIndex < exam.questions.length
+          ) {
+            setCurrentIndex(parsed.currentIndex);
+          }
+        }
+      }
+    } catch (error) {
+      console.error(
+        "Unable to restore exam progress:",
+        error
+      );
+    } finally {
+      setIsRestored(true);
+    }
+  }, [exam.questions, storageKey]);
+
+  /*
+   * Save answers and current question locally.
+   * The storage key is unique to this examination.
+   */
+  useEffect(() => {
+    if (!isRestored || submitting) {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          answers,
+          currentIndex,
+        })
+      );
+    } catch (error) {
+      console.error(
+        "Unable to save exam progress:",
+        error
+      );
+    }
+  }, [
+    answers,
+    currentIndex,
+    isRestored,
+    storageKey,
+    submitting,
+  ]);
 
   const answeredCount = useMemo(
     () => Object.keys(answers).length,
@@ -62,13 +151,6 @@ export default function ExamClient({ exam }: ExamClientProps) {
       ? ((currentIndex + 1) / exam.questions.length) * 100
       : 0;
 
-  /*
-   * Countdown timer
-   *
-   * The timer is calculated from the original server-provided
-   * expiresAt value on every tick. It is NOT based on a local
-   * countdown that can be reset by refreshing the page.
-   */
   useEffect(() => {
     const expiresAtMs = new Date(exam.expiresAt).getTime();
 
@@ -92,17 +174,24 @@ export default function ExamClient({ exam }: ExamClientProps) {
     return () => clearInterval(timer);
   }, [exam.expiresAt]);
 
-  /*
-   * Automatically submit when the timer reaches zero.
-   */
   useEffect(() => {
-    if (secondsLeft <= 0 && !submissionStartedRef.current) {
+    if (
+      isRestored &&
+      secondsLeft <= 0 &&
+      !submissionStartedRef.current
+    ) {
       submitExam(true);
     }
-  }, [secondsLeft]);
+  }, [secondsLeft, isRestored]);
 
   function selectAnswer(answer: string) {
-    if (submitting || secondsLeft <= 0) return;
+    if (
+      submitting ||
+      secondsLeft <= 0 ||
+      !currentQuestion
+    ) {
+      return;
+    }
 
     setAnswers((current) => ({
       ...current,
@@ -113,7 +202,9 @@ export default function ExamClient({ exam }: ExamClientProps) {
   }
 
   function goToPrevious() {
-    if (submitting || secondsLeft <= 0) return;
+    if (submitting || secondsLeft <= 0) {
+      return;
+    }
 
     if (currentIndex > 0) {
       setCurrentIndex((current) => current - 1);
@@ -121,7 +212,9 @@ export default function ExamClient({ exam }: ExamClientProps) {
   }
 
   function goToNext() {
-    if (submitting || secondsLeft <= 0) return;
+    if (submitting || secondsLeft <= 0) {
+      return;
+    }
 
     if (currentIndex < exam.questions.length - 1) {
       setCurrentIndex((current) => current + 1);
@@ -129,12 +222,9 @@ export default function ExamClient({ exam }: ExamClientProps) {
   }
 
   async function submitExam(autoSubmit = false) {
-    /*
-     * This ref is more reliable than checking only React state.
-     * It prevents manual submission + automatic submission from
-     * happening at the same time.
-     */
-    if (submissionStartedRef.current) return;
+    if (submissionStartedRef.current) {
+      return;
+    }
 
     submissionStartedRef.current = true;
     setSubmitting(true);
@@ -156,10 +246,6 @@ export default function ExamClient({ exam }: ExamClientProps) {
       const data = await response.json();
 
       if (!response.ok || !data.success) {
-        /*
-         * If the server rejects the submission, allow another
-         * attempt instead of permanently locking the student.
-         */
         submissionStartedRef.current = false;
         setSubmitting(false);
 
@@ -172,10 +258,18 @@ export default function ExamClient({ exam }: ExamClientProps) {
       }
 
       /*
-       * Submission was successful.
-       * Send the student directly to the result belonging to
-       * this exam.
+       * The exam has now been successfully submitted.
+       * Remove only this exam's temporary browser state.
        */
+      try {
+        window.localStorage.removeItem(storageKey);
+      } catch (error) {
+        console.error(
+          "Unable to clear saved exam progress:",
+          error
+        );
+      }
+
       router.push(`/results/${data.result.id}`);
       router.refresh();
     } catch {
@@ -189,7 +283,12 @@ export default function ExamClient({ exam }: ExamClientProps) {
   }
 
   function handleSubmitClick() {
-    if (submitting || secondsLeft <= 0) return;
+    if (
+      submitting ||
+      secondsLeft <= 0
+    ) {
+      return;
+    }
 
     const unanswered =
       exam.questions.length - answeredCount;
@@ -218,12 +317,16 @@ export default function ExamClient({ exam }: ExamClientProps) {
   if (!currentQuestion) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
-        <div className="rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-slate-200">
-          <h1 className="text-xl font-bold text-slate-900">
+        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-red-100 text-2xl">
+            !
+          </div>
+
+          <h1 className="mt-5 text-xl font-bold text-slate-900">
             No questions found
           </h1>
 
-          <p className="mt-2 text-sm text-slate-500">
+          <p className="mt-2 text-sm leading-6 text-slate-500">
             This exam does not contain any questions.
           </p>
         </div>
@@ -232,43 +335,56 @@ export default function ExamClient({ exam }: ExamClientProps) {
   }
 
   const timeExpired = secondsLeft <= 0;
+  const isLowTime = secondsLeft <= 300 && !timeExpired;
+  const selectedAnswer = answers[currentQuestion.id];
 
   return (
     <main className="min-h-screen bg-slate-50">
       {/* Header */}
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white">
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white shadow-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div>
-            <p className="text-sm font-medium text-blue-600">
-              {exam.subject.name}
-            </p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <img
+                src="/logo.jpg"
+                alt="Student Prep"
+                className="h-8 w-auto shrink-0 object-contain"
+              />
 
-            <h1 className="text-lg font-bold text-slate-900 sm:text-xl">
+              <p className="truncate text-sm font-semibold text-blue-600">
+                {exam.subject.name}
+              </p>
+            </div>
+
+            <h1 className="mt-2 truncate text-lg font-bold text-slate-900 sm:text-xl">
               {exam.title}
             </h1>
           </div>
 
+          {/* Timer */}
           <div
-            className={`rounded-xl px-4 py-2 text-center ${
-              timeExpired || secondsLeft <= 300
-                ? "bg-red-50 text-red-700"
-                : "bg-blue-50 text-blue-700"
+            className={`shrink-0 rounded-xl border px-4 py-2.5 text-center shadow-sm ${
+              timeExpired
+                ? "border-red-300 bg-red-50 text-red-700"
+                : isLowTime
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : "border-blue-200 bg-blue-50 text-blue-700"
             }`}
           >
-            <p className="text-xs font-medium uppercase tracking-wide">
+            <p className="text-[10px] font-bold uppercase tracking-wider">
               {timeExpired ? "Time Expired" : "Time Left"}
             </p>
 
-            <p className="text-xl font-bold tabular-nums">
+            <p className="mt-0.5 text-xl font-bold tabular-nums sm:text-2xl">
               {formatTime(secondsLeft)}
             </p>
           </div>
         </div>
 
-        {/* Progress bar */}
-        <div className="h-1 bg-slate-100">
+        {/* Progress */}
+        <div className="h-1.5 bg-slate-100">
           <div
-            className="h-1 bg-blue-600 transition-all"
+            className="h-1.5 bg-blue-600 transition-all duration-300"
             style={{
               width: `${progressPercentage}%`,
             }}
@@ -278,132 +394,182 @@ export default function ExamClient({ exam }: ExamClientProps) {
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[1fr_280px] lg:px-8">
         {/* Main Question Area */}
-        <section className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-8">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="rounded-full bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-700">
-              Question {currentIndex + 1} of{" "}
-              {exam.questions.length}
-            </span>
+        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="p-5 sm:p-8">
+            {/* Question metadata */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-blue-100 px-3 py-1.5 text-sm font-bold text-blue-700">
+                  Question {currentIndex + 1}
+                </span>
 
-            <span className="text-sm font-medium text-slate-500">
-              {currentQuestion.marks} mark
-              {currentQuestion.marks === 1 ? "" : "s"}
-            </span>
-          </div>
+                <span className="text-sm text-slate-400">
+                  of {exam.questions.length}
+                </span>
+              </div>
 
-          <h2 className="mt-6 text-xl font-bold leading-8 text-slate-900 sm:text-2xl">
-            {currentQuestion.questionText}
-          </h2>
+              <span className="rounded-full bg-green-50 px-3 py-1.5 text-sm font-semibold text-green-700">
+                {currentQuestion.marks} mark
+                {currentQuestion.marks === 1 ? "" : "s"}
+              </span>
+            </div>
 
-          <div className="mt-8 space-y-3">
-            {[
-              {
-                key: "A",
-                text: currentQuestion.optionA,
-              },
-              {
-                key: "B",
-                text: currentQuestion.optionB,
-              },
-              {
-                key: "C",
-                text: currentQuestion.optionC,
-              },
-              {
-                key: "D",
-                text: currentQuestion.optionD,
-              },
-            ].map((option) => {
-              const selected =
-                answers[currentQuestion.id] === option.key;
+            {/* Question */}
+            <div className="mt-7">
+              <p className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400">
+                Question {currentQuestion.questionNo}
+              </p>
 
-              return (
-                <button
-                  key={option.key}
-                  type="button"
-                  onClick={() => selectAnswer(option.key)}
-                  disabled={submitting || timeExpired}
-                  className={`flex w-full items-start gap-4 rounded-xl border p-4 text-left transition ${
-                    selected
-                      ? "border-blue-600 bg-blue-50 ring-2 ring-blue-100"
-                      : "border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50"
-                  } disabled:cursor-not-allowed disabled:opacity-60`}
-                >
-                  <span
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border text-sm font-bold ${
+              <h2 className="text-xl font-bold leading-8 text-slate-900 sm:text-2xl">
+                {currentQuestion.questionText}
+              </h2>
+            </div>
+
+            {/* Options */}
+            <div className="mt-8 space-y-3">
+              {[
+                {
+                  key: "A",
+                  text: currentQuestion.optionA,
+                },
+                {
+                  key: "B",
+                  text: currentQuestion.optionB,
+                },
+                {
+                  key: "C",
+                  text: currentQuestion.optionC,
+                },
+                {
+                  key: "D",
+                  text: currentQuestion.optionD,
+                },
+              ].map((option) => {
+                const selected =
+                  selectedAnswer === option.key;
+
+                return (
+                  <button
+                    key={option.key}
+                    type="button"
+                    onClick={() => selectAnswer(option.key)}
+                    disabled={submitting || timeExpired}
+                    className={`group flex w-full items-start gap-4 rounded-xl border p-4 text-left transition ${
                       selected
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : "border-slate-300 bg-white text-slate-700"
-                    }`}
+                        ? "border-blue-600 bg-blue-50 ring-2 ring-blue-100"
+                        : "border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50/40"
+                    } disabled:cursor-not-allowed disabled:opacity-60`}
                   >
-                    {option.key}
-                  </span>
+                    <span
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-sm font-bold transition ${
+                        selected
+                          ? "border-blue-600 bg-blue-600 text-white"
+                          : "border-slate-300 bg-white text-slate-700 group-hover:border-blue-400 group-hover:text-blue-700"
+                      }`}
+                    >
+                      {option.key}
+                    </span>
 
-                  <span className="pt-1 text-sm leading-6 text-slate-700 sm:text-base">
-                    {option.text}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                    <span
+                      className={`pt-1 text-sm leading-6 sm:text-base ${
+                        selected
+                          ? "font-medium text-blue-900"
+                          : "text-slate-700"
+                      }`}
+                    >
+                      {option.text}
+                    </span>
 
-          {timeExpired && submitting && (
-            <div className="mt-6 rounded-xl bg-amber-50 p-4 text-sm font-semibold text-amber-800">
-              Time is up. Your test is being submitted automatically...
+                    {selected && (
+                      <span className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-600 text-xs font-bold text-white">
+                        ✓
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
-          )}
 
-          {error && (
-            <div className="mt-6 rounded-xl bg-red-50 p-4 text-sm font-medium text-red-700">
-              {error}
-            </div>
-          )}
+            {/* Auto-submit message */}
+            {timeExpired && submitting && (
+              <div className="mt-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-600 text-xs text-white">
+                  !
+                </span>
 
-          {/* Navigation */}
-          <div className="mt-8 flex flex-col gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
-            <button
-              type="button"
-              onClick={goToPrevious}
-              disabled={
-                currentIndex === 0 ||
-                submitting ||
-                timeExpired
-              }
-              className="rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              ← Previous
-            </button>
-
-            {currentIndex < exam.questions.length - 1 ? (
-              <button
-                type="button"
-                onClick={goToNext}
-                disabled={submitting || timeExpired}
-                className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Next →
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={handleSubmitClick}
-                disabled={submitting || timeExpired}
-                className="rounded-xl bg-green-600 px-6 py-3 text-sm font-semibold text-white transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {submitting ? "Submitting..." : "Submit Test"}
-              </button>
+                <span>
+                  Time is up. Your test is being submitted automatically...
+                </span>
+              </div>
             )}
+
+            {/* Error */}
+            {error && (
+              <div className="mt-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm font-medium text-red-700">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 font-bold text-red-700">
+                  !
+                </span>
+
+                <span>{error}</span>
+              </div>
+            )}
+
+            {/* Navigation */}
+            <div className="mt-8 flex flex-col gap-3 border-t border-slate-200 pt-6 sm:flex-row sm:items-center sm:justify-between">
+              <button
+                type="button"
+                onClick={goToPrevious}
+                disabled={
+                  currentIndex === 0 ||
+                  submitting ||
+                  timeExpired
+                }
+                className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                ← Previous
+              </button>
+
+              <div className="text-center text-xs font-medium text-slate-500">
+                {answeredCount} of {exam.questions.length} answered
+              </div>
+
+              {currentIndex < exam.questions.length - 1 ? (
+                <button
+                  type="button"
+                  onClick={goToNext}
+                  disabled={submitting || timeExpired}
+                  className="rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Next →
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSubmitClick}
+                  disabled={submitting || timeExpired}
+                  className="rounded-xl bg-green-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-700 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {submitting ? "Submitting..." : "Submit Test"}
+                </button>
+              )}
+            </div>
           </div>
         </section>
 
         {/* Question Navigator */}
-        <aside className="h-fit rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200 lg:sticky lg:top-24">
+        <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-5 shadow-sm lg:sticky lg:top-24">
           <div className="flex items-center justify-between">
-            <h3 className="font-bold text-slate-900">
-              Questions
-            </h3>
+            <div>
+              <h3 className="font-bold text-slate-900">
+                Questions
+              </h3>
 
-            <span className="text-xs font-medium text-slate-500">
+              <p className="mt-1 text-xs text-slate-500">
+                Navigate through the test
+              </p>
+            </div>
+
+            <span className="rounded-full bg-green-50 px-2.5 py-1 text-xs font-bold text-green-700">
               {answeredCount}/{exam.questions.length}
             </span>
           </div>
@@ -425,10 +591,10 @@ export default function ExamClient({ exam }: ExamClientProps) {
                   disabled={submitting || timeExpired}
                   className={`h-10 rounded-lg text-sm font-bold transition ${
                     active
-                      ? "bg-blue-600 text-white ring-2 ring-blue-200"
+                      ? "bg-blue-600 text-white shadow-sm ring-2 ring-blue-200"
                       : answered
-                      ? "bg-green-100 text-green-700"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        ? "border border-green-200 bg-green-100 text-green-700 hover:bg-green-200"
+                        : "border border-slate-200 bg-slate-100 text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
                   } disabled:cursor-not-allowed disabled:opacity-60`}
                 >
                   {index + 1}
@@ -437,7 +603,8 @@ export default function ExamClient({ exam }: ExamClientProps) {
             })}
           </div>
 
-          <div className="mt-6 space-y-2 text-xs text-slate-500">
+          {/* Legend */}
+          <div className="mt-6 space-y-2.5 border-t border-slate-100 pt-5 text-xs text-slate-500">
             <div className="flex items-center gap-2">
               <span className="h-3 w-3 rounded bg-blue-600" />
               Current question
@@ -454,14 +621,19 @@ export default function ExamClient({ exam }: ExamClientProps) {
             </div>
           </div>
 
+          {/* Submit */}
           <button
             type="button"
             onClick={handleSubmitClick}
             disabled={submitting || timeExpired}
-            className="mt-6 w-full rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-6 w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {submitting ? "Submitting..." : "Submit Test"}
           </button>
+
+          <p className="mt-3 text-center text-[11px] leading-4 text-slate-400">
+            Make sure you have reviewed your answers before submitting.
+          </p>
         </aside>
       </div>
     </main>

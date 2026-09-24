@@ -9,70 +9,100 @@ interface AdminExamsPageProps {
     search?: string;
     subjectId?: string;
     status?: string;
+    page?: string;
   }>;
 }
 
-function formatDate(date: Date | null | undefined) {
-  if (!date) {
-    return "—";
+const PAGE_SIZE = 20;
+
+const statusLabels: Record<string, string> = {
+  NOT_STARTED: "Not Started",
+  IN_PROGRESS: "In Progress",
+  SUBMITTED: "Submitted",
+  AUTO_SUBMITTED: "Auto Submitted",
+  MARKED: "Marked",
+};
+
+const statusStyles: Record<string, string> = {
+  NOT_STARTED: "bg-slate-100 text-slate-700",
+  IN_PROGRESS: "bg-blue-100 text-blue-700",
+  SUBMITTED: "bg-amber-100 text-amber-700",
+  AUTO_SUBMITTED: "bg-red-100 text-red-700",
+  MARKED: "bg-green-100 text-green-700",
+};
+
+function examTypeLabel(title: string) {
+  const normalizedTitle = title.toLowerCase();
+
+  if (normalizedTitle.includes("bece")) {
+    return "BECE";
   }
 
-  return new Intl.DateTimeFormat("en-GH", {
+  if (normalizedTitle.includes("likely")) {
+    return "Likely";
+  }
+
+  if (
+    normalizedTitle.includes("topic") ||
+    normalizedTitle.includes("topic-based")
+  ) {
+    return "Topic-Based";
+  }
+
+  return "Exam";
+}
+
+function formatDuration(minutes: number) {
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+
+  if (remainingMinutes === 0) {
+    return `${hours} hr`;
+  }
+
+  return `${hours} hr ${remainingMinutes} min`;
+}
+
+function formatDate(date: Date) {
+  return date.toLocaleString("en-US", {
     dateStyle: "medium",
     timeStyle: "short",
-  }).format(date);
+  });
 }
 
-function formatPercentage(
-  value: string | number | null | undefined | { toString(): string }
+function buildPageUrl(
+  search: string,
+  subjectId: string,
+  status: string,
+  page: number
 ) {
-  if (value === null || value === undefined) {
-    return "—";
+  const params = new URLSearchParams();
+
+  if (search) {
+    params.set("search", search);
   }
 
-  return `${Number(value.toString()).toFixed(1)}%`;
-}
-
-function statusLabel(status: string) {
-  switch (status) {
-    case "SUBMITTED":
-      return "Submitted";
-
-    case "AUTO_SUBMITTED":
-      return "Auto Submitted";
-
-    case "IN_PROGRESS":
-      return "In Progress";
-
-    case "MARKED":
-      return "Marked";
-
-    case "NOT_STARTED":
-      return "Not Started";
-
-    default:
-      return status;
+  if (subjectId) {
+    params.set("subjectId", subjectId);
   }
-}
 
-function statusClasses(status: string) {
-  switch (status) {
-    case "SUBMITTED":
-    case "MARKED":
-      return "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200";
-
-    case "AUTO_SUBMITTED":
-      return "bg-amber-50 text-amber-700 ring-1 ring-amber-200";
-
-    case "IN_PROGRESS":
-      return "bg-blue-50 text-blue-700 ring-1 ring-blue-200";
-
-    case "NOT_STARTED":
-      return "bg-slate-100 text-slate-600 ring-1 ring-slate-200";
-
-    default:
-      return "bg-slate-100 text-slate-600 ring-1 ring-slate-200";
+  if (status) {
+    params.set("status", status);
   }
+
+  if (page > 1) {
+    params.set("page", String(page));
+  }
+
+  const query = params.toString();
+
+  return query
+    ? `/admin/exams?${query}`
+    : "/admin/exams";
 }
 
 export default async function AdminExamsPage({
@@ -94,7 +124,11 @@ export default async function AdminExamsPage({
     },
   });
 
-  if (!admin || !admin.isActive || admin.role !== "ADMIN") {
+  if (
+    !admin ||
+    !admin.isActive ||
+    admin.role !== "ADMIN"
+  ) {
     redirect("/dashboard");
   }
 
@@ -104,110 +138,117 @@ export default async function AdminExamsPage({
   const subjectId = params.subjectId || "";
   const status = params.status || "";
 
-  const validStatuses = [
-    "NOT_STARTED",
-    "IN_PROGRESS",
-    "SUBMITTED",
-    "AUTO_SUBMITTED",
-    "MARKED",
-  ];
+  const parsedPage = Number(params.page || "1");
 
-  const [exams, subjects] = await Promise.all([
-    prisma.exam.findMany({
-      where: {
-        ...(search
-          ? {
-              OR: [
-                {
-                  title: {
-                    contains: search,
-                    mode: "insensitive",
-                  },
-                },
-                {
-                  user: {
-                    email: {
-                      contains: search,
-                      mode: "insensitive",
-                    },
-                  },
-                },
-                {
-                  user: {
+  const currentPage =
+    Number.isFinite(parsedPage) && parsedPage > 0
+      ? Math.floor(parsedPage)
+      : 1;
+
+  const where = {
+    ...(search
+      ? {
+          OR: [
+            {
+              title: {
+                contains: search,
+                mode: "insensitive" as const,
+              },
+            },
+            {
+              user: {
+                OR: [
+                  {
                     firstName: {
                       contains: search,
-                      mode: "insensitive",
+                      mode: "insensitive" as const,
                     },
                   },
-                },
-                {
-                  user: {
+                  {
                     lastName: {
                       contains: search,
-                      mode: "insensitive",
+                      mode: "insensitive" as const,
                     },
                   },
-                },
-              ],
-            }
-          : {}),
+                  {
+                    email: {
+                      contains: search,
+                      mode: "insensitive" as const,
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }
+      : {}),
+    ...(subjectId
+      ? {
+          subjectId,
+        }
+      : {}),
+    ...(status
+      ? {
+          status: status as
+            | "NOT_STARTED"
+            | "IN_PROGRESS"
+            | "SUBMITTED"
+            | "AUTO_SUBMITTED"
+            | "MARKED",
+        }
+      : {}),
+  };
 
-        ...(subjectId
-          ? {
-              subjectId,
-            }
-          : {}),
+  const [
+    totalExams,
+    notStartedCount,
+    inProgressCount,
+    submittedCount,
+    autoSubmittedCount,
+    markedCount,
+    totalFilteredExams,
+    subjects,
+  ] = await Promise.all([
+    prisma.exam.count(),
 
-        ...(status && validStatuses.includes(status)
-          ? {
-              status: status as
-                | "NOT_STARTED"
-                | "IN_PROGRESS"
-                | "SUBMITTED"
-                | "AUTO_SUBMITTED"
-                | "MARKED",
-            }
-          : {}),
-      },
-
-      include: {
-        user: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            email: true,
-          },
-        },
-
-        subject: {
-          select: {
-            id: true,
-            name: true,
-          },
-        },
-
-        result: {
-          select: {
-            id: true,
-            score: true,
-            totalMarks: true,
-            percentage: true,
-            correctAnswers: true,
-            wrongAnswers: true,
-            unanswered: true,
-            timeUsedSeconds: true,
-            completedAt: true,
-          },
-        },
-      },
-
-      orderBy: {
-        createdAt: "desc",
+    prisma.exam.count({
+      where: {
+        status: "NOT_STARTED",
       },
     }),
 
+    prisma.exam.count({
+      where: {
+        status: "IN_PROGRESS",
+      },
+    }),
+
+    prisma.exam.count({
+      where: {
+        status: "SUBMITTED",
+      },
+    }),
+
+    prisma.exam.count({
+      where: {
+        status: "AUTO_SUBMITTED",
+      },
+    }),
+
+    prisma.exam.count({
+      where: {
+        status: "MARKED",
+      },
+    }),
+
+    prisma.exam.count({
+      where,
+    }),
+
     prisma.subject.findMany({
+      where: {
+        isActive: true,
+      },
       select: {
         id: true,
         name: true,
@@ -218,61 +259,222 @@ export default async function AdminExamsPage({
     }),
   ]);
 
-  return (
-    <main className="min-h-screen bg-slate-100 p-6">
-      <div className="mx-auto max-w-7xl">
-        {/* Header */}
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-900">
-              Exams
-            </h1>
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalFilteredExams / PAGE_SIZE)
+  );
 
-            <p className="mt-2 text-slate-600">
-              View and monitor student examination activity.
+  const safePage = Math.min(
+    currentPage,
+    totalPages
+  );
+
+  const skip = (safePage - 1) * PAGE_SIZE;
+
+  const exams = await prisma.exam.findMany({
+    where,
+    include: {
+      user: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+        },
+      },
+      subject: {
+        select: {
+          id: true,
+          name: true,
+        },
+      },
+      result: {
+        select: {
+          id: true,
+          score: true,
+          totalMarks: true,
+          percentage: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    skip,
+    take: PAGE_SIZE,
+  });
+
+  const firstItem =
+    totalFilteredExams === 0
+      ? 0
+      : skip + 1;
+
+  const lastItem = Math.min(
+    skip + exams.length,
+    totalFilteredExams
+  );
+
+  const hasFilters =
+    Boolean(search) ||
+    Boolean(subjectId) ||
+    Boolean(status);
+
+  return (
+    <main className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="border-b border-slate-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <Link
+                href="/admin"
+                className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+              >
+                ← Back to Admin Dashboard
+              </Link>
+
+              <h1 className="mt-3 text-2xl font-bold text-slate-900 sm:text-3xl">
+                Exam Management
+              </h1>
+
+              <p className="mt-1 text-sm text-slate-500">
+                Monitor student examinations, statuses,
+                results, and activity.
+              </p>
+            </div>
+
+            <Link
+              href="/admin/questions"
+              className="inline-flex w-fit items-center rounded-lg border border-blue-200 bg-white px-4 py-2.5 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
+            >
+              Manage Questions
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+        {/* Overview */}
+        <section>
+          <div className="mb-5">
+            <div className="flex items-center gap-3">
+              <div className="h-8 w-1 rounded-full bg-blue-600" />
+
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Examination Overview
+                </h2>
+
+                <p className="mt-1 text-sm text-slate-500">
+                  Current examination activity across
+                  the platform.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-slate-500">
+                Total
+              </p>
+
+              <p className="mt-2 text-3xl font-bold text-slate-900">
+                {totalExams.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-slate-500">
+                Not Started
+              </p>
+
+              <p className="mt-2 text-3xl font-bold text-slate-700">
+                {notStartedCount.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-blue-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-blue-600">
+                In Progress
+              </p>
+
+              <p className="mt-2 text-3xl font-bold text-blue-700">
+                {inProgressCount.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-amber-600">
+                Submitted
+              </p>
+
+              <p className="mt-2 text-3xl font-bold text-amber-700">
+                {submittedCount.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-red-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-red-600">
+                Auto Submitted
+              </p>
+
+              <p className="mt-2 text-3xl font-bold text-red-700">
+                {autoSubmittedCount.toLocaleString()}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-green-200 bg-white p-5 shadow-sm">
+              <p className="text-sm font-medium text-green-600">
+                Marked
+              </p>
+
+              <p className="mt-2 text-3xl font-bold text-green-700">
+                {markedCount.toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Filters */}
+        <section className="mt-8 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-5">
+            <h2 className="text-lg font-bold text-slate-900">
+              Filter Examinations
+            </h2>
+
+            <p className="mt-1 text-sm text-slate-500">
+              Search by student, email, or examination
+              title.
             </p>
           </div>
 
-          <Link
-            href="/admin"
-            className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-          >
-            ← Admin Dashboard
-          </Link>
-        </div>
-
-        {/* Filters */}
-        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">
-            Filter Exams
-          </h2>
-
           <form
             method="GET"
-            className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-4"
+            className="grid gap-4 md:grid-cols-4"
           >
-            <div className="lg:col-span-2">
+            <div>
               <label
                 htmlFor="search"
-                className="mb-2 block text-sm font-medium text-slate-700"
+                className="mb-2 block text-sm font-semibold text-slate-700"
               >
                 Search
               </label>
 
               <input
                 id="search"
-                type="search"
                 name="search"
+                type="text"
                 defaultValue={search}
-                placeholder="Search title, student name or email..."
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                placeholder="Student or exam..."
+                className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
             </div>
 
             <div>
               <label
                 htmlFor="subjectId"
-                className="mb-2 block text-sm font-medium text-slate-700"
+                className="mb-2 block text-sm font-semibold text-slate-700"
               >
                 Subject
               </label>
@@ -281,9 +483,11 @@ export default async function AdminExamsPage({
                 id="subjectId"
                 name="subjectId"
                 defaultValue={subjectId}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               >
-                <option value="">All Subjects</option>
+                <option value="">
+                  All Subjects
+                </option>
 
                 {subjects.map((subject) => (
                   <option
@@ -299,7 +503,7 @@ export default async function AdminExamsPage({
             <div>
               <label
                 htmlFor="status"
-                className="mb-2 block text-sm font-medium text-slate-700"
+                className="mb-2 block text-sm font-semibold text-slate-700"
               >
                 Status
               </label>
@@ -308,9 +512,11 @@ export default async function AdminExamsPage({
                 id="status"
                 name="status"
                 defaultValue={status}
-                className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               >
-                <option value="">All Statuses</option>
+                <option value="">
+                  All Statuses
+                </option>
 
                 <option value="NOT_STARTED">
                   Not Started
@@ -334,188 +540,466 @@ export default async function AdminExamsPage({
               </select>
             </div>
 
-            <div className="flex flex-col gap-3 md:col-span-2 lg:col-span-4 sm:flex-row">
+            <div className="flex items-end gap-2">
               <button
                 type="submit"
-                className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+                className="flex-1 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
               >
                 Apply Filters
               </button>
 
-              {(search || subjectId || status) && (
+              {hasFilters && (
                 <Link
                   href="/admin/exams"
-                  className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-center text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
                 >
-                  Clear Filters
+                  Clear
                 </Link>
               )}
             </div>
           </form>
         </section>
 
-        {/* Count */}
-        <div className="mb-4">
-          <p className="text-sm text-slate-600">
-            Showing{" "}
-            <span className="font-semibold text-slate-900">
-              {exams.length}
-            </span>{" "}
-            {exams.length === 1 ? "exam" : "exams"}.
-          </p>
-        </div>
+        {/* Results */}
+        <section className="mt-8 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 px-6 py-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">
+                  Examinations
+                </h2>
 
-        {/* Exams Table */}
-        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="min-w-full">
-              <thead className="border-b border-slate-200 bg-slate-50">
-                <tr>
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Student
-                  </th>
+                <p className="mt-1 text-sm text-slate-500">
+                  {totalFilteredExams === 0
+                    ? "No examinations found."
+                    : `Showing ${firstItem}-${lastItem} of ${totalFilteredExams.toLocaleString()} examinations.`}
+                </p>
+              </div>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Exam
-                  </th>
+              <Link
+                href="/admin/results"
+                className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+              >
+                View Results →
+              </Link>
+            </div>
+          </div>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Subject
-                  </th>
+          {exams.length === 0 ? (
+            <div className="p-10 text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 text-2xl">
+                📝
+              </div>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Questions
-                  </th>
+              <h3 className="mt-4 text-lg font-bold text-slate-900">
+                No examinations found
+              </h3>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Duration
-                  </th>
+              <p className="mt-2 text-sm text-slate-500">
+                Try changing your search or filter
+                settings.
+              </p>
+            </div>
+          ) : (
+            <>
+              {/* Desktop Table */}
+              <div className="hidden overflow-x-auto lg:block">
+                <table className="w-full text-left">
+                  <thead className="border-b border-slate-200 bg-slate-50">
+                    <tr>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Student
+                      </th>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Status
-                  </th>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Exam
+                      </th>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Result
-                  </th>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Type
+                      </th>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Created
-                  </th>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Subject
+                      </th>
 
-                  <th className="px-6 py-4 text-left text-sm font-semibold text-slate-700">
-                    Action
-                  </th>
-                </tr>
-              </thead>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Questions
+                      </th>
 
-              <tbody className="divide-y divide-slate-100">
-                {exams.map((exam) => (
-                  <tr
-                    key={exam.id}
-                    className="hover:bg-slate-50"
-                  >
-                    <td className="px-6 py-4">
-                      <p className="whitespace-nowrap font-medium text-slate-900">
-                        {exam.user.firstName}{" "}
-                        {exam.user.lastName}
-                      </p>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Duration
+                      </th>
 
-                      <p className="mt-1 text-sm text-slate-500">
-                        {exam.user.email}
-                      </p>
-                    </td>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Status
+                      </th>
 
-                    <td className="max-w-xs px-6 py-4">
-                      <p className="font-medium text-slate-900">
-                        {exam.title}
-                      </p>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Result
+                      </th>
 
-                      <p className="mt-1 text-xs text-slate-500">
-                        ID: {exam.id}
-                      </p>
-                    </td>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Created
+                      </th>
 
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
-                      {exam.subject.name}
-                    </td>
+                      <th className="px-5 py-4 text-xs font-bold uppercase tracking-wide text-slate-500">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
 
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
-                      {exam.totalQuestions}
-                    </td>
-
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
-                      {exam.durationMinutes} min
-                    </td>
-
-                    <td className="whitespace-nowrap px-6 py-4">
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-medium ${statusClasses(
-                          exam.status
-                        )}`}
+                  <tbody className="divide-y divide-slate-100">
+                    {exams.map((exam) => (
+                      <tr
+                        key={exam.id}
+                        className="transition hover:bg-slate-50"
                       >
-                        {statusLabel(exam.status)}
-                      </span>
-                    </td>
-
-                    <td className="whitespace-nowrap px-6 py-4">
-                      {exam.result ? (
-                        <div>
+                        <td className="px-5 py-4">
                           <p className="font-semibold text-slate-900">
-                            {exam.result.score}/
-                            {exam.result.totalMarks}
+                            {exam.user.firstName}{" "}
+                            {exam.user.lastName}
                           </p>
 
-                          <p className="mt-1 text-sm text-blue-600">
-                            {formatPercentage(
-                              exam.result.percentage
+                          <p className="mt-1 text-xs text-slate-500">
+                            {exam.user.email}
+                          </p>
+                        </td>
+
+                        <td className="max-w-xs px-5 py-4">
+                          <p className="font-semibold text-slate-900">
+                            {exam.title}
+                          </p>
+
+                          <p className="mt-1 break-all text-xs text-slate-400">
+                            {exam.id}
+                          </p>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span className="inline-flex rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                            {examTypeLabel(
+                              exam.title
                             )}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span className="text-sm font-medium text-slate-700">
+                            {exam.subject.name}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span className="text-sm font-semibold text-slate-900">
+                            {exam.totalQuestions}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span className="text-sm text-slate-700">
+                            {formatDuration(
+                              exam.durationMinutes
+                            )}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                              statusStyles[
+                                exam.status
+                              ] ||
+                              "bg-slate-100 text-slate-700"
+                            }`}
+                          >
+                            {statusLabels[
+                              exam.status
+                            ] || exam.status}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          {exam.result ? (
+                            <div>
+                              <p className="font-semibold text-slate-900">
+                                {exam.result.score}/
+                                {
+                                  exam.result
+                                    .totalMarks
+                                }
+                              </p>
+
+                              <p className="mt-1 text-xs font-semibold text-blue-600">
+                                {Number(
+                                  exam.result
+                                    .percentage
+                                ).toFixed(2)}
+                                %
+                              </p>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">
+                              No result
+                            </span>
+                          )}
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <span className="text-xs text-slate-500">
+                            {formatDate(
+                              exam.createdAt
+                            )}
+                          </span>
+                        </td>
+
+                        <td className="px-5 py-4">
+                          <div className="flex flex-wrap gap-2">
+                            <Link
+                              href={`/admin/exams/${exam.id}`}
+                              className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-blue-700 transition hover:bg-blue-50"
+                            >
+                              View
+                            </Link>
+
+                            {(exam.status ===
+                              "NOT_STARTED" ||
+                              exam.status ===
+                                "IN_PROGRESS") && (
+                              <CancelExamButton
+                                id={exam.id}
+                                status={exam.status}
+                              />
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Cards */}
+              <div className="divide-y divide-slate-100 lg:hidden">
+                {exams.map((exam) => (
+                  <article
+                    key={exam.id}
+                    className="p-5"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h3 className="font-bold text-slate-900">
+                          {exam.title}
+                        </h3>
+
+                        <p className="mt-1 text-sm text-slate-500">
+                          {exam.subject.name}
+                        </p>
+                      </div>
+
+                      <span
+                        className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                          statusStyles[
+                            exam.status
+                          ] ||
+                          "bg-slate-100 text-slate-700"
+                        }`}
+                      >
+                        {statusLabels[
+                          exam.status
+                        ] || exam.status}
+                      </span>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">
+                          Student
+                        </p>
+
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {exam.user.firstName}{" "}
+                          {exam.user.lastName}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">
+                          Exam Type
+                        </p>
+
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {examTypeLabel(
+                            exam.title
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">
+                          Questions
+                        </p>
+
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {exam.totalQuestions}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">
+                          Duration
+                        </p>
+
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {formatDuration(
+                            exam.durationMinutes
+                          )}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">
+                          Result
+                        </p>
+
+                        {exam.result ? (
+                          <p className="mt-1 text-sm font-semibold text-slate-900">
+                            {exam.result.score}/
+                            {
+                              exam.result
+                                .totalMarks
+                            }{" "}
+                            (
+                            {Number(
+                              exam.result
+                                .percentage
+                            ).toFixed(2)}
+                            %)
                           </p>
-                        </div>
-                      ) : (
-                        <span className="text-sm text-slate-400">
-                          No result
-                        </span>
-                      )}
-                    </td>
+                        ) : (
+                          <p className="mt-1 text-sm text-slate-400">
+                            No result
+                          </p>
+                        )}
+                      </div>
 
-                    <td className="whitespace-nowrap px-6 py-4 text-sm text-slate-600">
-                      {formatDate(exam.createdAt)}
-                    </td>
+                      <div className="rounded-lg bg-slate-50 p-3">
+                        <p className="text-xs text-slate-500">
+                          Created
+                        </p>
 
-                    <td className="whitespace-nowrap px-6 py-4">
-                      <div className="flex flex-wrap gap-2">
-                        <Link
-                          href={`/admin/exams/${exam.id}`}
-                          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                        >
-                          View
-                        </Link>
+                        <p className="mt-1 text-sm font-semibold text-slate-900">
+                          {formatDate(
+                            exam.createdAt
+                          )}
+                        </p>
+                      </div>
+                    </div>
 
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Link
+                        href={`/admin/exams/${exam.id}`}
+                        className="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
+                      >
+                        View Examination
+                      </Link>
+
+                      {(exam.status ===
+                        "NOT_STARTED" ||
+                        exam.status ===
+                          "IN_PROGRESS") && (
                         <CancelExamButton
                           id={exam.id}
                           status={exam.status}
                         />
-                      </div>
-                    </td>
-                  </tr>
+                      )}
+                    </div>
+                  </article>
                 ))}
+              </div>
+            </>
+          )}
 
-                {exams.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="px-6 py-12 text-center text-sm text-slate-500"
-                    >
-                      No exams found matching the
-                      selected filters.
-                    </td>
-                  </tr>
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex flex-col gap-4 border-t border-slate-200 px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-sm text-slate-500">
+                Page{" "}
+                <strong className="text-slate-900">
+                  {safePage}
+                </strong>{" "}
+                of{" "}
+                <strong className="text-slate-900">
+                  {totalPages}
+                </strong>
+              </p>
+
+              <div className="flex items-center gap-2">
+                {safePage > 1 ? (
+                  <Link
+                    href={buildPageUrl(
+                      search,
+                      subjectId,
+                      status,
+                      safePage - 1
+                    )}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    ← Previous
+                  </Link>
+                ) : (
+                  <span className="cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-400">
+                    ← Previous
+                  </span>
                 )}
-              </tbody>
-            </table>
+
+                {safePage < totalPages ? (
+                  <Link
+                    href={buildPageUrl(
+                      search,
+                      subjectId,
+                      status,
+                      safePage + 1
+                    )}
+                    className="rounded-lg border border-blue-200 bg-white px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50"
+                  >
+                    Next →
+                  </Link>
+                ) : (
+                  <span className="cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-400">
+                    Next →
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* Navigation */}
+        <section className="mt-8">
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/admin"
+              className="rounded-lg bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700"
+            >
+              Back to Admin Dashboard
+            </Link>
+
+            <Link
+              href="/admin/results"
+              className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Manage Results
+            </Link>
+
+            <Link
+              href="/admin/questions"
+              className="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+            >
+              Manage Questions
+            </Link>
           </div>
-        </div>
+        </section>
       </div>
     </main>
   );

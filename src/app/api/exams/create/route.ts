@@ -3,8 +3,72 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { auth } from "@/auth";
 
+const MIN_QUESTIONS = 20;
+
+const ALLOWED_DURATIONS = new Set([
+  2700, // 45 minutes
+  3600, // 1 hour
+  4500, // 1 hour 15 minutes
+  5400, // 1 hour 30 minutes
+  6300, // 1 hour 45 minutes
+  7200, // 2 hours
+]);
+
+const ALLOWED_QUESTION_COUNTS = new Set([
+  20,
+  25,
+  30,
+  35,
+  40,
+]);
+
+const ALLOWED_EXAM_TYPES = new Set([
+  "BECE",
+  "LIKELY",
+  "TOPIC_BASED",
+]);
+
+const classLabels: Record<string, string> = {
+  PRIMARY_1: "Primary 1",
+  PRIMARY_2: "Primary 2",
+  PRIMARY_3: "Primary 3",
+  PRIMARY_4: "Primary 4",
+  PRIMARY_5: "Primary 5",
+  PRIMARY_6: "Primary 6",
+  JHS_1: "JHS 1",
+  JHS_2: "JHS 2",
+  JHS_3: "JHS 3",
+};
+
+const examTypeLabels: Record<string, string> = {
+  BECE: "BECE",
+  LIKELY: "Likely Examination Questions",
+  TOPIC_BASED: "Topic-Based Examination",
+};
+
+function shuffle<T>(items: T[]): T[] {
+  const result = [...items];
+
+  for (let index = result.length - 1; index > 0; index--) {
+    const randomIndex = Math.floor(
+      Math.random() * (index + 1)
+    );
+
+    [result[index], result[randomIndex]] = [
+      result[randomIndex],
+      result[index],
+    ];
+  }
+
+  return result;
+}
+
 export async function POST(request: Request) {
   try {
+    // ---------------------------------------------------------
+    // Authentication
+    // ---------------------------------------------------------
+
     const session = await auth();
 
     if (!session?.user?.id) {
@@ -19,6 +83,10 @@ export async function POST(request: Request) {
 
     const userId = session.user.id;
 
+    // ---------------------------------------------------------
+    // Read request body
+    // ---------------------------------------------------------
+
     const body = await request.json();
 
     const subjectId =
@@ -30,6 +98,41 @@ export async function POST(request: Request) {
       typeof body.creationKey === "string"
         ? body.creationKey.trim()
         : "";
+
+    const examType =
+      typeof body.examType === "string"
+        ? body.examType.trim().toUpperCase()
+        : "";
+
+    const topicId =
+      typeof body.topicId === "string"
+        ? body.topicId.trim()
+        : "";
+
+    const beceYear =
+      body.beceYear === undefined ||
+      body.beceYear === null ||
+      body.beceYear === ""
+        ? null
+        : Number(body.beceYear);
+
+    const duration =
+      body.duration === undefined ||
+      body.duration === null ||
+      body.duration === ""
+        ? null
+        : Number(body.duration);
+
+    const questionCount =
+      body.questionCount === undefined ||
+      body.questionCount === null ||
+      body.questionCount === ""
+        ? null
+        : Number(body.questionCount);
+
+    // ---------------------------------------------------------
+    // Basic validation
+    // ---------------------------------------------------------
 
     if (!subjectId) {
       return NextResponse.json(
@@ -51,12 +154,128 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * Verify that the subject exists.
-     */
+    if (
+      !examType ||
+      !ALLOWED_EXAM_TYPES.has(examType)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid examination type.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      duration === null ||
+      !Number.isInteger(duration) ||
+      !ALLOWED_DURATIONS.has(duration)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Invalid examination duration.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      questionCount === null ||
+      !Number.isInteger(questionCount) ||
+      !ALLOWED_QUESTION_COUNTS.has(questionCount)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Invalid number of questions.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (
+      examType === "BECE" &&
+      questionCount !== 40
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "BECE examinations must contain exactly 40 questions.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Conditional validation
+    // ---------------------------------------------------------
+
+    if (examType === "TOPIC_BASED" && !topicId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "A topic is required for a topic-based examination.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (examType !== "TOPIC_BASED" && topicId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "A topic can only be selected for a topic-based examination.",
+        },
+        { status: 400 }
+      );
+    }
+
+    if (examType === "BECE") {
+      if (
+        beceYear === null ||
+        !Number.isInteger(beceYear) ||
+        beceYear < 2000 ||
+        beceYear > new Date().getFullYear()
+      ) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "A valid BECE year is required.",
+          },
+          { status: 400 }
+        );
+      }
+    } else if (beceYear !== null) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "BECE year can only be selected for a BECE examination.",
+        },
+        { status: 400 }
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Verify subject
+    // ---------------------------------------------------------
+
     const subject = await prisma.subject.findUnique({
       where: {
         id: subjectId,
+      },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
       },
     });
 
@@ -64,30 +283,146 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           success: false,
-          message: "Subject not found or inactive.",
+          message:
+            "Subject not found or inactive.",
         },
         { status: 404 }
       );
     }
 
-    /*
-     * Idempotency check.
-     *
-     * If the same creation key is submitted again, return the
-     * already-created exam instead of creating another one.
-     */
+    // ---------------------------------------------------------
+    // Verify student profile
+    // ---------------------------------------------------------
+
+    const profile = await prisma.profile.findUnique({
+      where: {
+        userId,
+      },
+      select: {
+        classLevel: true,
+      },
+    });
+
+    if (!profile?.classLevel) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Your class has not been set. Please update your profile.",
+        },
+        { status: 400 }
+      );
+    }
+
+    const studentClass = profile.classLevel;
+    const classLabel =
+      classLabels[studentClass] ?? studentClass;
+
+    // ---------------------------------------------------------
+    // JHS restriction for BECE
+    // ---------------------------------------------------------
+
+    if (
+      examType === "BECE" &&
+      !studentClass.startsWith("JHS_")
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "BECE examinations are available to JHS students.",
+        },
+        { status: 403 }
+      );
+    }
+
+    // ---------------------------------------------------------
+    // Verify topic when Topic-Based
+    // ---------------------------------------------------------
+
+    let selectedTopic: {
+      id: string;
+      name: string;
+      subjectId: string;
+    } | null = null;
+
+    if (examType === "TOPIC_BASED") {
+      selectedTopic = await prisma.topic.findFirst({
+        where: {
+          id: topicId,
+          subjectId,
+        },
+        select: {
+          id: true,
+          name: true,
+          subjectId: true,
+        },
+      });
+
+      if (!selectedTopic) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              "The selected topic is not available for this subject.",
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // ---------------------------------------------------------
+    // Verify BECE year exists
+    // ---------------------------------------------------------
+
+    if (
+      examType === "BECE" &&
+      beceYear !== null
+    ) {
+      const beceQuestionExists =
+        await prisma.question.findFirst({
+          where: {
+            subjectId,
+            classLevel: {
+              in: [
+                "JHS_1",
+                "JHS_2",
+                "JHS_3",
+              ],
+            },
+            examType: "BECE",
+            beceYear,
+            status: "PUBLISHED",
+          },
+          select: {
+            id: true,
+          },
+        });
+
+      if (!beceQuestionExists) {
+        return NextResponse.json(
+          {
+            success: false,
+            message:
+              `No published BECE ${beceYear} questions are currently available for ${subject.name}.`,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
+    // ---------------------------------------------------------
+    // Idempotency check
+    // ---------------------------------------------------------
+
     const existingByCreationKey =
       await prisma.exam.findUnique({
         where: {
-          creationKey,
+          examCreationKey: creationKey,
         },
       });
 
     if (existingByCreationKey) {
-      /*
-       * Never allow a creation key belonging to another user or
-       * another subject to be reused.
-       */
       if (
         existingByCreationKey.userId !== userId ||
         existingByCreationKey.subjectId !== subjectId
@@ -95,7 +430,8 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             success: false,
-            message: "Invalid exam creation request.",
+            message:
+              "Invalid exam creation request.",
           },
           { status: 403 }
         );
@@ -113,8 +449,10 @@ export async function POST(request: Request) {
               existingByCreationKey.durationMinutes,
             totalQuestions:
               existingByCreationKey.totalQuestions,
-            startedAt: existingByCreationKey.startedAt,
-            expiresAt: existingByCreationKey.expiresAt,
+            startedAt:
+              existingByCreationKey.startedAt,
+            expiresAt:
+              existingByCreationKey.expiresAt,
           },
           existing: true,
         },
@@ -122,9 +460,10 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * Result of the transaction.
-     */
+    // ---------------------------------------------------------
+    // Create examination transaction
+    // ---------------------------------------------------------
+
     let result:
       | {
           exam: {
@@ -139,26 +478,16 @@ export async function POST(request: Request) {
         }
       | undefined;
 
-    /*
-     * Retry transient Prisma P2034 write conflicts.
-     *
-     * This can happen when two requests attempt to create an exam
-     * for the same user and subject simultaneously.
-     */
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         result = await prisma.$transaction(
           async (tx) => {
-            /*
-             * Advisory lock.
-             *
-             * The lock is based on the authenticated user and
-             * selected subject.
-             *
-             * Build the lock key first so that the SQL template
-             * remains simple and safe.
-             */
-            const lockKey = `${userId}:${subjectId}`;
+            // -------------------------------------------------
+            // Advisory lock
+            // -------------------------------------------------
+
+            const lockKey =
+              `${userId}:${subjectId}`;
 
             await tx.$queryRaw`
               SELECT 'locked'::text AS lock_status
@@ -168,25 +497,25 @@ export async function POST(request: Request) {
                 )
               ) AS lock_result
             `;
-            /*
-             * Check for an existing active exam.
-             *
-             * This check is inside the transaction and protected
-             * by the advisory lock.
-             */
-            const activeExam = await tx.exam.findFirst({
-              where: {
-                userId,
-                subjectId,
-                status: "IN_PROGRESS",
-                expiresAt: {
-                  gt: new Date(),
+
+            // -------------------------------------------------
+            // Existing active exam
+            // -------------------------------------------------
+
+            const activeExam =
+              await tx.exam.findFirst({
+                where: {
+                  userId,
+                  subjectId,
+                  status: "IN_PROGRESS",
+                  expiresAt: {
+                    gt: new Date(),
+                  },
                 },
-              },
-              orderBy: {
-                createdAt: "desc",
-              },
-            });
+                orderBy: {
+                  createdAt: "desc",
+                },
+              });
 
             if (activeExam) {
               return {
@@ -197,8 +526,10 @@ export async function POST(request: Request) {
                     activeExam.durationMinutes,
                   totalQuestions:
                     activeExam.totalQuestions,
-                  startedAt: activeExam.startedAt,
-                  expiresAt: activeExam.expiresAt,
+                  startedAt:
+                    activeExam.startedAt,
+                  expiresAt:
+                    activeExam.expiresAt,
                 },
                 created: false,
               };
@@ -206,14 +537,10 @@ export async function POST(request: Request) {
 
             const now = new Date();
 
-            /*
-             * Find an active subscription.
-             *
-             * Paid subscriptions are valid only when their
-             * expiry date is still in the future.
-             *
-             * The Free plan has no expiry date.
-             */
+            // -------------------------------------------------
+            // Find active subscription
+            // -------------------------------------------------
+
             let subscription =
               await tx.subscription.findFirst({
                 where: {
@@ -251,9 +578,10 @@ export async function POST(request: Request) {
                 },
               });
 
-            /*
-             * Check whether the user has an expired paid plan.
-             */
+            // -------------------------------------------------
+            // Expired paid subscription
+            // -------------------------------------------------
+
             const expiredPaidSubscription =
               await tx.subscription.findFirst({
                 where: {
@@ -281,9 +609,6 @@ export async function POST(request: Request) {
                 },
               });
 
-            /*
-             * Expire the paid subscription and fall back to Free.
-             */
             if (expiredPaidSubscription) {
               await tx.subscription.update({
                 where: {
@@ -314,13 +639,18 @@ export async function POST(request: Request) {
             }
 
             if (!subscription) {
-              throw new Error("SUBSCRIPTION_EXPIRED");
+              throw new Error(
+                "SUBSCRIPTION_EXPIRED"
+              );
             }
 
-            /*
-             * Enforce Free-plan test limit.
-             */
-            if (subscription.plan.type === "FREE") {
+            // -------------------------------------------------
+            // Free-plan limit
+            // -------------------------------------------------
+
+            if (
+              subscription.plan.type === "FREE"
+            ) {
               const freeLimit =
                 subscription.plan.testsAllowed ?? 0;
 
@@ -337,17 +667,25 @@ export async function POST(request: Request) {
                   },
                 });
 
-                throw new Error("TEST_LIMIT_REACHED");
+                throw new Error(
+                  "TEST_LIMIT_REACHED"
+                );
               }
             }
 
-            /*
-             * Re-check the subject inside the transaction.
-             */
+            // -------------------------------------------------
+            // Re-check subject
+            // -------------------------------------------------
+
             const transactionSubject =
               await tx.subject.findUnique({
                 where: {
                   id: subjectId,
+                },
+                select: {
+                  id: true,
+                  name: true,
+                  isActive: true,
                 },
               });
 
@@ -355,63 +693,130 @@ export async function POST(request: Request) {
               !transactionSubject ||
               !transactionSubject.isActive
             ) {
-              throw new Error("SUBJECT_NOT_FOUND");
+              throw new Error(
+                "SUBJECT_NOT_FOUND"
+              );
             }
 
-            /*
-             * Get published questions only.
-             */
+            // -------------------------------------------------
+            // Build secure question filter
+            // -------------------------------------------------
+
+            const questionWhere: Prisma.QuestionWhereInput =
+              {
+                subjectId,
+                status: "PUBLISHED",
+                classLevel:
+                  examType === "BECE"
+                    ? "JHS_3"
+                    : studentClass,
+                examType:
+                  examType as
+                    | "BECE"
+                    | "LIKELY"
+                    | "TOPIC_BASED",
+              };
+
+            if (
+              examType === "TOPIC_BASED" &&
+              selectedTopic
+            ) {
+              questionWhere.topicId =
+                selectedTopic.id;
+            }
+
+            if (
+              examType === "BECE" &&
+              beceYear !== null
+            ) {
+              questionWhere.beceYear = beceYear;
+            }
+
+            // -------------------------------------------------
+            // Retrieve matching published questions
+            // -------------------------------------------------
+
             const publishedQuestions =
               await tx.question.findMany({
-                where: {
-                  subjectId,
-                  status: "PUBLISHED",
-                },
+                where: questionWhere,
                 select: {
                   id: true,
                   marks: true,
                 },
               });
 
-            /*
-             * A valid test requires at least 20 questions.
-             */
-            if (publishedQuestions.length < 20) {
-              throw new Error("NOT_ENOUGH_QUESTIONS");
+            // -------------------------------------------------
+            // Minimum question requirement
+            // -------------------------------------------------
+
+            if (
+              publishedQuestions.length <
+              questionCount
+            ) {
+              throw new Error(
+                "NOT_ENOUGH_QUESTIONS"
+              );
             }
 
-            /*
-             * Randomize the available questions.
-             */
-            const shuffledQuestions = [
-              ...publishedQuestions,
-            ].sort(() => Math.random() - 0.5);
+            // -------------------------------------------------
+            // Random selection
+            // -------------------------------------------------
+
+            const shuffledQuestions =
+              shuffle(publishedQuestions);
 
             const selectedQuestions =
-              shuffledQuestions.slice(0, 20);
+              shuffledQuestions.slice(
+                0,
+                questionCount
+              );
 
-            const durationMinutes = 30;
+            // -------------------------------------------------
+            // Duration
+            // -------------------------------------------------
+
+            const durationMinutes =
+              duration / 60;
 
             const startedAt = new Date();
 
             const expiresAt = new Date(
               startedAt.getTime() +
-                durationMinutes * 60 * 1000
+                duration * 1000
             );
 
-            /*
-             * Create the exam.
-             *
-             * Correct answers are deliberately NOT selected here.
-             * The active exam API should only expose the question
-             * and option data.
-             */
+            // -------------------------------------------------
+            // Build title
+            // ---------------------------------------------------------
+
+            let title =
+              `${transactionSubject.name} `;
+
+            if (examType === "BECE") {
+              title += `BECE ${beceYear}`;
+            } else if (
+              examType === "TOPIC_BASED" &&
+              selectedTopic
+            ) {
+              title += selectedTopic.name;
+            } else {
+              title +=
+                examTypeLabels.LIKELY;
+            }
+
+            title += ` — ${classLabel}`;
+
+            // -------------------------------------------------
+            // Create exam
+            // ---------------------------------------------------------
+
             const exam = await tx.exam.create({
               data: {
-                creationKey,
+                examCreationKey:
+                  creationKey,
                 userId,
                 subjectId,
-                title: `${transactionSubject.name} Practice Test`,
+                title,
                 durationMinutes,
                 totalQuestions:
                   selectedQuestions.length,
@@ -419,20 +824,25 @@ export async function POST(request: Request) {
                 startedAt,
                 expiresAt,
                 questions: {
-                  create: selectedQuestions.map(
-                    (question, index) => ({
-                      questionId: question.id,
-                      questionNo: index + 1,
-                      marks: question.marks,
-                    })
-                  ),
+                  create:
+                    selectedQuestions.map(
+                      (question, index) => ({
+                        questionId:
+                          question.id,
+                        questionNo:
+                          index + 1,
+                        marks:
+                          question.marks,
+                      })
+                    ),
                 },
               },
             });
 
-            /*
-             * Count the test against the subscription.
-             */
+            // -------------------------------------------------
+            // Count test against subscription
+            // ---------------------------------------------------------
+
             await tx.subscription.update({
               where: {
                 id: subscription.id,
@@ -441,7 +851,8 @@ export async function POST(request: Request) {
                 testsUsed: {
                   increment: 1,
                 },
-                ...(subscription.plan.type === "FREE"
+                ...(subscription.plan.type ===
+                "FREE"
                   ? {
                       freeTestsUsed: {
                         increment: 1,
@@ -451,10 +862,14 @@ export async function POST(request: Request) {
               },
             });
 
-            /*
-             * When the Free plan reaches 5 tests, mark it expired.
-             */
-            if (subscription.plan.type === "FREE") {
+            // -------------------------------------------------
+            // Expire Free plan after final test
+            // ---------------------------------------------------------
+
+            if (
+              subscription.plan.type ===
+              "FREE"
+            ) {
               const freeLimit =
                 subscription.plan.testsAllowed ?? 0;
 
@@ -462,7 +877,8 @@ export async function POST(request: Request) {
                 subscription.freeTestsUsed + 1;
 
               if (
-                newFreeTestsUsed >= freeLimit
+                newFreeTestsUsed >=
+                freeLimit
               ) {
                 await tx.subscription.update({
                   where: {
@@ -483,8 +899,10 @@ export async function POST(request: Request) {
                   exam.durationMinutes,
                 totalQuestions:
                   exam.totalQuestions,
-                startedAt: exam.startedAt,
-                expiresAt: exam.expiresAt,
+                startedAt:
+                  exam.startedAt,
+                expiresAt:
+                  exam.expiresAt,
               },
               created: true,
             };
@@ -494,14 +912,8 @@ export async function POST(request: Request) {
           }
         );
 
-        /*
-         * Transaction completed successfully.
-         */
         break;
       } catch (error) {
-        /*
-         * Only retry Prisma P2034.
-         */
         if (
           !(
             error instanceof
@@ -518,25 +930,29 @@ export async function POST(request: Request) {
             `Retrying attempt ${attempt + 1}/3...`
         );
 
-        /*
-         * Small backoff before retrying.
-         */
         await new Promise((resolve) =>
-          setTimeout(resolve, 100 * attempt)
+          setTimeout(
+            resolve,
+            100 * attempt
+          )
         );
       }
     }
 
-    /*
-     * Safety check.
-     */
+    // ---------------------------------------------------------
+    // Safety check
+    // ---------------------------------------------------------
+
     if (!result) {
-      throw new Error("EXAM_CREATION_FAILED");
+      throw new Error(
+        "EXAM_CREATION_FAILED"
+      );
     }
 
-    /*
-     * Another request created the active exam first.
-     */
+    // ---------------------------------------------------------
+    // Existing active exam
+    // ---------------------------------------------------------
+
     if (!result.created) {
       return NextResponse.json(
         {
@@ -550,20 +966,25 @@ export async function POST(request: Request) {
       );
     }
 
-    /*
-     * New exam created successfully.
-     */
+    // ---------------------------------------------------------
+    // Success
+    // ---------------------------------------------------------
+
     return NextResponse.json(
       {
         success: true,
-        message: "Exam created successfully.",
+        message:
+          "Exam created successfully.",
         exam: result.exam,
         existing: false,
       },
       { status: 201 }
     );
   } catch (error) {
-    console.error("Exam creation error:", error);
+    console.error(
+      "Exam creation error:",
+      error
+    );
 
     if (error instanceof Error) {
       switch (error.message) {
@@ -602,7 +1023,7 @@ export async function POST(request: Request) {
             {
               success: false,
               message:
-                "There are not enough published questions for this subject to create a test.",
+                "There are not enough published questions matching your selected examination settings.",
             },
             { status: 400 }
           );

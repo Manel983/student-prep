@@ -1,3 +1,4 @@
+```gitignore
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
@@ -45,5 +46,10 @@ next-env.d.ts
 .claude/
 .cursor/
 .devin/
-.vercel
-.env*
+
+# Uploaded question-import files
+/uploads/
+
+# Local diagnostic scripts
+check-db.mjs
+```

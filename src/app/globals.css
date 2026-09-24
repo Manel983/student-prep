@@ -1,25 +1,93 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* ========================================
+     Student Prep Brand Colours
+     ======================================== */
+
+  /* Base */
+  --background: #f8fafc;
+  --foreground: #0f172a;
+
+  /* White */
+  --white: #ffffff;
+
+  /* Blue - Primary Brand */
+  --blue-primary: #2563eb;
+  --blue-dark: #1d4ed8;
+  --blue-light: #dbeafe;
+  --blue-soft: #eff6ff;
+
+  /* Green - Success */
+  --green-primary: #16a34a;
+  --green-dark: #15803d;
+  --green-light: #dcfce7;
+  --green-soft: #f0fdf4;
+
+  /* Red - Error / Danger */
+  --red-primary: #dc2626;
+  --red-dark: #b91c1c;
+  --red-light: #fee2e2;
+  --red-soft: #fef2f2;
+
+  /* Neutral */
+  --gray-50: #f8fafc;
+  --gray-100: #f1f5f9;
+  --gray-200: #e2e8f0;
+  --gray-300: #cbd5e1;
+  --gray-500: #64748b;
+  --gray-600: #475569;
+  --gray-700: #334155;
+  --gray-900: #0f172a;
 }
 
 @theme inline {
+  /* Base */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
+  /* White */
+  --color-white: var(--white);
+
+  /* Blue */
+  --color-primary: var(--blue-primary);
+  --color-primary-dark: var(--blue-dark);
+  --color-primary-light: var(--blue-light);
+  --color-primary-soft: var(--blue-soft);
+
+  /* Green */
+  --color-success: var(--green-primary);
+  --color-success-dark: var(--green-dark);
+  --color-success-light: var(--green-light);
+  --color-success-soft: var(--green-soft);
+
+  /* Red */
+  --color-danger: var(--red-primary);
+  --color-danger-dark: var(--red-dark);
+  --color-danger-light: var(--red-light);
+  --color-danger-soft: var(--red-soft);
+
+  /* Neutral */
+  --color-gray-50: var(--gray-50);
+  --color-gray-100: var(--gray-100);
+  --color-gray-200: var(--gray-200);
+  --color-gray-300: var(--gray-300);
+  --color-gray-500: var(--gray-500);
+  --color-gray-600: var(--gray-600);
+  --color-gray-700: var(--gray-700);
+  --color-gray-900: var(--gray-900);
+
+  /* Fonts */
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--background);
 }
 
 body {
+  margin: 0;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;

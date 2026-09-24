@@ -31,6 +31,23 @@ const registerSchema = z
     confirmPassword: z
       .string()
       .min(1, "Please confirm your password."),
+
+    classLevel: z.enum(
+      [
+        "PRIMARY_1",
+        "PRIMARY_2",
+        "PRIMARY_3",
+        "PRIMARY_4",
+        "PRIMARY_5",
+        "PRIMARY_6",
+        "JHS_1",
+        "JHS_2",
+        "JHS_3",
+      ],
+      {
+        message: "Please select a valid class.",
+      }
+    ),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: "Passwords do not match.",
@@ -59,6 +76,7 @@ export async function POST(request: Request) {
       lastName,
       email,
       password,
+      classLevel,
     } = validation.data;
 
     const normalizedEmail = email.toLowerCase();
@@ -109,7 +127,9 @@ export async function POST(request: Request) {
           isActive: true,
 
           profile: {
-            create: {},
+            create: {
+              classLevel,
+            },
           },
 
           subscriptions: {
